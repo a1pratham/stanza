@@ -30,7 +30,7 @@ Deno.serve(async (_req) => {
       .from('articles')
       .select('article_id, title, description, source_id, sources(name)')
       .eq('status', 'pending_summary')
-      .order('created_at', { ascending: true })
+      .order('published_at', { ascending: false })
       .limit(BATCH_SIZE);
 
     if (fetchError) throw fetchError;
