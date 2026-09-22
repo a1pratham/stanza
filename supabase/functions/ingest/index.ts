@@ -15,7 +15,15 @@ import Parser from 'npm:rss-parser@3';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-const parser = new Parser({ timeout: 10000 });
+const parser = new Parser({
+  timeout: 10000,
+  customFields: {
+    item: [
+      ['media:content', 'mediaContent', { keepArray: true }],
+      ['media:thumbnail', 'mediaThumbnail', { keepArray: true }],
+    ],
+  },
+});
 
 /** Strips HTML tags from RSS descriptions so downstream AI summarization
  * (Phase 3) gets clean text, not markup. */
@@ -26,8 +34,26 @@ function stripHtml(html: string | undefined): string {
 
 /** Pulls an image URL out of common RSS enclosure/media field shapes. */
 function extractImageUrl(item: any): string | null {
+  // Standard RSS enclosure
   if (item.enclosure?.url) return item.enclosure.url;
-  if (item['media:content']?.$?.url) return item['media:content'].$.url;
+
+  // Media RSS content
+  const mediaContent = item.mediaContent?.[0]?.$?.url;
+  if (mediaContent) return mediaContent;
+
+  // Media RSS thumbnail
+  const mediaThumbnail = item.mediaThumbnail?.[0]?.$?.url;
+  if (mediaThumbnail) return mediaThumbnail;
+
+  // Fallback: extract the first image from RSS HTML content
+  const htmlSource =
+    item['content:encoded'] || item.content || item.contentSnippet;
+
+  if (htmlSource) {
+    const match = /<img[^>]+src="([^">]+)"/i.exec(htmlSource);
+    if (match) return match[1];
+  }
+
   return null;
 }
 
@@ -40,11 +66,21 @@ interface SourceRow {
 
 async function ingestSource(supabase: any, source: SourceRow) {
   let feed;
+
   try {
     feed = await parser.parseURL(source.feed_url);
   } catch (err) {
-    console.error(`Failed to fetch feed for ${source.name} (${source.feed_url}):`, err.message);
-    return { source: source.name, fetched: 0, added: 0, error: err.message };
+    console.error(
+      `Failed to fetch feed for ${source.name} (${source.feed_url}):`,
+      err.message,
+    );
+
+    return {
+      source: source.name,
+      fetched: 0,
+      added: 0,
+      error: err.message,
+    };
   }
 
   const items = feed.items ?? [];
@@ -52,39 +88,58 @@ async function ingestSource(supabase: any, source: SourceRow) {
 
   for (const item of items) {
     const sourceUrl = item.link;
-    if (!sourceUrl || !item.title) continue; // skip malformed entries
+
+    if (!sourceUrl || !item.title) continue;
 
     const row = {
       source_id: source.source_id,
       title: item.title.trim(),
       source_url: sourceUrl,
-      description: stripHtml(item.contentSnippet || item.content || item.summary),
+      description: stripHtml(
+        item.contentSnippet || item.content || item.summary,
+      ),
       image_url: extractImageUrl(item),
       published_at: item.isoDate ?? new Date().toISOString(),
       category: source.category,
       status: 'pending_summary',
     };
 
-    // The unique constraint on source_url is the dedup mechanism (spec
-    // section 12, URL-level check). ignoreDuplicates makes repeat runs
-    // a safe no-op instead of throwing an error.
+    // The unique constraint on source_url is the dedup mechanism.
+    // ignoreDuplicates makes repeat runs a safe no-op.
     const { error, count } = await supabase
       .from('articles')
-      .upsert(row, { onConflict: 'source_url', ignoreDuplicates: true, count: 'exact' });
+      .upsert(row, {
+        onConflict: 'source_url',
+        ignoreDuplicates: true,
+        count: 'exact',
+      });
 
     if (error) {
-      console.error(`Insert failed for "${row.title}":`, error.message);
+      console.error(
+        `Insert failed for "${row.title}":`,
+        error.message,
+      );
       continue;
     }
-    if (count && count > 0) added += 1;
+
+    if (count && count > 0) {
+      added += 1;
+    }
   }
 
-  return { source: source.name, fetched: items.length, added };
+  return {
+    source: source.name,
+    fetched: items.length,
+    added,
+  };
 }
 
 Deno.serve(async (_req) => {
   try {
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    const supabase = createClient(
+      SUPABASE_URL,
+      SERVICE_ROLE_KEY,
+    );
 
     const { data: sources, error } = await supabase
       .from('sources')
@@ -94,22 +149,51 @@ Deno.serve(async (_req) => {
     if (error) throw error;
 
     const results = [];
+
     for (const source of sources as SourceRow[]) {
       const result = await ingestSource(supabase, source);
       results.push(result);
     }
 
-    const totalAdded = results.reduce((sum, r) => sum + r.added, 0);
-    console.log(`Ingestion complete. New articles added: ${totalAdded}`);
+    const totalAdded = results.reduce(
+      (sum, r) => sum + r.added,
+      0,
+    );
 
-    return new Response(JSON.stringify({ ok: true, totalAdded, results }, null, 2), {
-      headers: { 'Content-Type': 'application/json' },
-    });
+    console.log(
+      `Ingestion complete. New articles added: ${totalAdded}`,
+    );
+
+    return new Response(
+      JSON.stringify(
+        {
+          ok: true,
+          totalAdded,
+          results,
+        },
+        null,
+        2,
+      ),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+    );
   } catch (err) {
     console.error('Ingestion run failed:', err);
-    return new Response(JSON.stringify({ ok: false, error: err.message }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: err.message,
+      }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      },
+    );
   }
 });
