@@ -4,8 +4,12 @@ import '../models/stanza.dart';
 /// Reads published Stanzas from the live Supabase pipeline and maps them
 /// into the existing Stanza model.
 ///
-/// PHASE 5 CHANGE: added `search()` and `fetchByIds()`. `fetchFeed()` and
-/// `_select`/`_mapRow` are UNCHANGED from Phase 4.
+/// PHASE 7 CHANGE: `_select` and `_mapRow` now also fetch and map
+/// `why_it_matters`, since Phase 7's summarizer finally populates it.
+/// This is the ONLY change in this file — fetchFeed(), search(), and
+/// fetchByIds() are otherwise identical to Phase 5, including the
+/// corrected `.order('articles(published_at)', ascending: false)` syntax
+/// that must be preserved per the current project state.
 class StanzaRepository {
   final SupabaseClient _client;
 
@@ -16,6 +20,7 @@ class StanzaRepository {
 stanza_id,
 headline,
 summary,
+why_it_matters,
 articles!inner (
   source_url,
   image_url,
@@ -43,14 +48,6 @@ articles!inner (
     return stanzas;
   }
 
-  /// PHASE 5 NEW: live text search over headline + summary.
-  ///
-  /// Two separate ilike queries (rather than a single `.or()` across a
-  /// joined table) because PostgREST's `.or()` filter syntax does not
-  /// reliably combine columns from the base table with columns from a
-  /// nested relationship in one expression. Results are merged and
-  /// de-duplicated by stanza_id client-side, which is fine at this data
-  /// volume (24-hour retention keeps the table small).
   Future<List<Stanza>> search(String query, {int limit = 30}) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];
@@ -86,10 +83,6 @@ articles!inner (
     return results;
   }
 
-  /// PHASE 5 NEW: fetches specific Stanzas by ID, for the Saved screen.
-  /// A bookmarked ID whose Stanza has since been removed by the 24-hour
-  /// cleanup job is simply absent from the result — the caller (Saved
-  /// screen) treats that as "no longer available" rather than an error.
   Future<List<Stanza>> fetchByIds(List<String> ids) async {
     if (ids.isEmpty) return [];
 
@@ -120,14 +113,22 @@ articles!inner (
     if (article is! Map<String, dynamic>) return null;
 
     final source = article['sources'];
-    final sourceName =
-    (source is Map<String, dynamic> ? source['name'] : null);
+    final sourceName = (source is Map<String, dynamic> ? source['name'] : null);
+
+    // PHASE 7: why_it_matters may now be a real string, or still null for
+    // older articles summarized before this phase deployed, or for
+    // stories the AI judged to have no broader significance. The model's
+    // default ('') keeps the card's existing unconditional rendering
+    // working either way — an empty string just renders an empty line,
+    // same as it always has for every card until now.
+    final whyItMatters = row['why_it_matters'] as String?;
 
     return Stanza(
       stanzaId: stanzaId,
       category: (article['category'] as String? ?? 'NEWS').toUpperCase(),
       headline: headline,
       summary: summary,
+      whyItMatters: whyItMatters ?? '',
       sourceName: sourceName as String? ?? 'Unknown source',
       sourceUrl: article['source_url'] as String? ?? '',
       timeAgo: _formatTimeAgo(article['published_at'] as String?),
