@@ -12,14 +12,13 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-
-  # PHASE 4: the only new dependency. Official Supabase client for Flutter,
-  # used by lib/services/stanza_repository.dart to query the live pipeline.
-  # It needs no backend changes: it reads with the public anon key against
-  # the read-only RLS policies already created in Phase 2/3.
   supabase_flutter: ^2.17.2
-
   shared_preferences: ^2.3.3
+
+  # PHASE 6: real in-app browser (Chrome Custom Tabs / SFSafariViewController)
+  url_launcher: ^6.3.1
+  # PHASE 6: real platform share sheet
+  share_plus: ^13.2.1
 
 dev_dependencies:
   flutter_test:

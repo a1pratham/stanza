@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/stanza.dart';
+import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
 import '../widgets/stanza_swipe_feed.dart';
@@ -71,23 +72,11 @@ class _SavedScreenState extends State<SavedScreen> {
   }
 
   void _onShare(Stanza stanza) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Share: ${stanza.headline}')),
-    );
+    ArticleActions.share(stanza);
   }
 
   void _openArticle(Stanza stanza) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF111111),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Text(
-          'Would open: ${stanza.sourceUrl}',
-          style: const TextStyle(color: Colors.white60),
-        ),
-      ),
-    );
+    ArticleActions.openArticle(context, stanza);
   }
 
   @override

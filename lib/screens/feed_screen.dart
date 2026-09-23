@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
 import '../models/stanza.dart';
+import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
 import '../widgets/stanza_swipe_feed.dart';
@@ -13,9 +14,14 @@ import 'search_screen.dart';
 /// points (a slim top bar over the feed), and bookmarks now persist via
 /// BookmarkStore instead of living only in memory.
 ///
+/// PHASE 6 CHANGE: swipe-right now opens a real in-app browser tab and
+/// share now opens the real platform share sheet, both via
+/// ArticleActions, replacing the Phase 1-4 bottom-sheet/SnackBar
+/// placeholders.
+///
 /// UNCHANGED: data loading via StanzaRepository.fetchFeed() (Phase 4),
-/// swipe gestures, share behavior, and the article bottom sheet — all now
-/// live inside StanzaSwipeFeed, reused as-is.
+/// swipe gesture thresholds, and StanzaCard itself — all still live
+/// inside StanzaSwipeFeed, reused as-is.
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
 
@@ -52,7 +58,7 @@ class _FeedScreenState extends State<FeedScreen> {
       setState(() {
         _isLoading = false;
         _error =
-        'SUPABASE_ANON_KEY was not provided at build time.\n'
+            'SUPABASE_ANON_KEY was not provided at build time.\n'
             'Run with --dart-define=SUPABASE_ANON_KEY=your-key.';
       });
       return;
@@ -106,43 +112,11 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   void _onShare(Stanza stanza) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Share: ${stanza.headline}')),
-    );
+    ArticleActions.share(stanza);
   }
 
   void _openArticle(Stanza stanza) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF111111),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Original Article',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Would open: ${stanza.sourceUrl}',
-              style: const TextStyle(color: Colors.white60),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'In-app browser comes in a later phase.',
-              style: TextStyle(color: Colors.white.withOpacity(0.4)),
-            ),
-          ],
-        ),
-      ),
-    );
+    ArticleActions.openArticle(context, stanza);
   }
 
   Future<void> _openSearch() async {
