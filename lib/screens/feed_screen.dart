@@ -1,25 +1,21 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
 import '../models/stanza.dart';
+import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
-import '../widgets/stanza_card.dart';
+import '../widgets/stanza_swipe_feed.dart';
+import 'saved_screen.dart';
+import 'search_screen.dart';
 
-/// The Home Feed screen — the core Stanza experience.
+/// The Home Feed screen.
 ///
-/// PHASE 4 CHANGE: `_stanzas` is now loaded from Supabase instead of being
-/// assigned from `mockStanzas`, and loading / empty / error states were
-/// added around the existing PageView.
+/// PHASE 5 CHANGE: adds a category filter chip row and Search/Saved entry
+/// points (a slim top bar over the feed), and bookmarks now persist via
+/// BookmarkStore instead of living only in memory.
 ///
-/// UNCHANGED: the PageView itself, scrollDirection, the horizontal-drag
-/// gesture handling and its velocity > 250 threshold, the bookmark set,
-/// the share SnackBar, the article bottom sheet, and every StanzaCard
-/// argument. The card is not modified at all.
-///
-/// Swipe behavior:
-///   - Swipe UP    -> next Stanza
-///   - Swipe DOWN  -> previous Stanza
-///   - Swipe RIGHT -> open original article
-///   - Swipe LEFT  -> reserved for related coverage in a later phase
+/// UNCHANGED: data loading via StanzaRepository.fetchFeed() (Phase 4),
+/// swipe gestures, share behavior, and the article bottom sheet — all now
+/// live inside StanzaSwipeFeed, reused as-is.
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
 
@@ -28,11 +24,13 @@ class FeedScreen extends StatefulWidget {
 }
 
 class _FeedScreenState extends State<FeedScreen> {
-  final PageController _pageController = PageController();
   final StanzaRepository _repository = StanzaRepository();
-  final Set<String> _bookmarkedIds = {};
+  final BookmarkStore _bookmarkStore = BookmarkStore();
 
   List<Stanza> _stanzas = const [];
+  Set<String> _bookmarkedIds = {};
+  String _selectedCategory = 'All';
+
   bool _isLoading = true;
   String? _error;
 
@@ -40,12 +38,13 @@ class _FeedScreenState extends State<FeedScreen> {
   void initState() {
     super.initState();
     _loadFeed();
+    _loadBookmarks();
   }
 
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
+  Future<void> _loadBookmarks() async {
+    final ids = await _bookmarkStore.load();
+    if (!mounted) return;
+    setState(() => _bookmarkedIds = ids);
   }
 
   Future<void> _loadFeed() async {
@@ -54,8 +53,7 @@ class _FeedScreenState extends State<FeedScreen> {
         _isLoading = false;
         _error =
         'SUPABASE_ANON_KEY was not provided at build time.\n'
-            'Run the app with --dart-define=SUPABASE_ANON_KEY=your-key '
-            '(see PHASE4_NOTES.md).';
+            'Run with --dart-define=SUPABASE_ANON_KEY=your-key.';
       });
       return;
     }
@@ -81,14 +79,30 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  void _toggleBookmark(String stanzaId) {
+  /// Categories are derived from whatever is actually in the loaded feed,
+  /// so the chip row never shows a category with zero live stories.
+  List<String> get _availableCategories {
+    final set = <String>{'All'};
+    for (final s in _stanzas) {
+      set.add(s.category);
+    }
+    return set.toList();
+  }
+
+  List<Stanza> get _visibleStanzas {
+    if (_selectedCategory == 'All') return _stanzas;
+    return _stanzas.where((s) => s.category == _selectedCategory).toList();
+  }
+
+  Future<void> _toggleBookmark(Stanza stanza) async {
     setState(() {
-      if (_bookmarkedIds.contains(stanzaId)) {
-        _bookmarkedIds.remove(stanzaId);
+      if (_bookmarkedIds.contains(stanza.stanzaId)) {
+        _bookmarkedIds = {..._bookmarkedIds}..remove(stanza.stanzaId);
       } else {
-        _bookmarkedIds.add(stanzaId);
+        _bookmarkedIds = {..._bookmarkedIds, stanza.stanzaId};
       }
     });
+    await _bookmarkStore.save(_bookmarkedIds);
   }
 
   void _onShare(Stanza stanza) {
@@ -123,11 +137,35 @@ class _FeedScreenState extends State<FeedScreen> {
             const SizedBox(height: 16),
             Text(
               'In-app browser comes in a later phase.',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
-              ),
+              style: TextStyle(color: Colors.white.withOpacity(0.4)),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SearchScreen(
+          repository: _repository,
+          bookmarkedIds: _bookmarkedIds,
+          bookmarkStore: _bookmarkStore,
+          onBookmarksChanged: (ids) => setState(() => _bookmarkedIds = ids),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSaved() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SavedScreen(
+          repository: _repository,
+          bookmarkedIds: _bookmarkedIds,
+          bookmarkStore: _bookmarkStore,
+          onBookmarksChanged: (ids) => setState(() => _bookmarkedIds = ids),
         ),
       ),
     );
@@ -137,7 +175,62 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+          _buildTopBar(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return SafeArea(
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Spacer(),
+              IconButton(
+                onPressed: _openSearch,
+                icon: const Icon(Icons.search, color: Colors.white),
+              ),
+              IconButton(
+                onPressed: _openSaved,
+                icon: const Icon(Icons.bookmark, color: Colors.white),
+              ),
+            ],
+          ),
+          if (!_isLoading && _error == null && _stanzas.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: _availableCategories.map((category) {
+                  final selected = category == _selectedCategory;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ChoiceChip(
+                      label: Text(category),
+                      selected: selected,
+                      onSelected: (_) =>
+                          setState(() => _selectedCategory = category),
+                      backgroundColor: const Color(0xFF181818),
+                      selectedColor: Colors.amberAccent,
+                      labelStyle: TextStyle(
+                        color: selected ? Colors.black : Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      side: BorderSide.none,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -157,45 +250,30 @@ class _FeedScreenState extends State<FeedScreen> {
       );
     }
 
-    if (_stanzas.isEmpty) {
+    final visible = _visibleStanzas;
+
+    if (visible.isEmpty) {
       return _FeedMessage(
         icon: Icons.article_outlined,
-        title: 'No stories yet',
-        message: 'No published Stanzas were found. '
-            'The pipeline may still be generating them.',
+        title: _stanzas.isEmpty ? 'No stories yet' : 'No stories in this category',
+        message: _stanzas.isEmpty
+            ? 'No published Stanzas were found. The pipeline may still be generating them.'
+            : 'Try a different category.',
         onRetry: _loadFeed,
       );
     }
 
-    return PageView.builder(
-      controller: _pageController,
-      scrollDirection: Axis.vertical,
-      itemCount: _stanzas.length,
-      itemBuilder: (context, index) {
-        final stanza = _stanzas[index];
-
-        return GestureDetector(
-          onHorizontalDragEnd: (details) {
-            final velocity = details.primaryVelocity ?? 0;
-
-            if (velocity > 250) {
-              _openArticle(stanza);
-            }
-          },
-          child: StanzaCard(
-            stanza: stanza,
-            isBookmarked: _bookmarkedIds.contains(stanza.stanzaId),
-            onBookmarkToggle: () => _toggleBookmark(stanza.stanzaId),
-            onShare: () => _onShare(stanza),
-            onOpenArticle: () => _openArticle(stanza),
-          ),
-        );
-      },
+    return StanzaSwipeFeed(
+      key: ValueKey(_selectedCategory), // fresh PageController per filter
+      stanzas: visible,
+      bookmarkedIds: _bookmarkedIds,
+      onBookmarkToggle: _toggleBookmark,
+      onShare: _onShare,
+      onOpenArticle: _openArticle,
     );
   }
 }
 
-/// Simple shared empty/error state, styled to match the dark feed.
 class _FeedMessage extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -238,9 +316,7 @@ class _FeedMessage extends StatelessWidget {
               const SizedBox(height: 20),
               TextButton(
                 onPressed: onRetry,
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.amberAccent,
-                ),
+                style: TextButton.styleFrom(foregroundColor: Colors.amberAccent),
                 child: const Text('Retry'),
               ),
             ],

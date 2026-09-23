@@ -19,6 +19,8 @@ dependencies:
   # the read-only RLS policies already created in Phase 2/3.
   supabase_flutter: ^2.17.2
 
+  shared_preferences: ^2.3.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
