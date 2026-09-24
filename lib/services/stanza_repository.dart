@@ -1,15 +1,14 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/related_article.dart';
 import '../models/stanza.dart';
 
 /// Reads published Stanzas from the live Supabase pipeline and maps them
 /// into the existing Stanza model.
 ///
-/// PHASE 7 CHANGE: `_select` and `_mapRow` now also fetch and map
-/// `why_it_matters`, since Phase 7's summarizer finally populates it.
-/// This is the ONLY change in this file — fetchFeed(), search(), and
-/// fetchByIds() are otherwise identical to Phase 5, including the
-/// corrected `.order('articles(published_at)', ascending: false)` syntax
-/// that must be preserved per the current project state.
+/// PHASE 8 CHANGE: added `fetchRelatedCoverage()`. fetchFeed(), search(),
+/// fetchByIds(), and _mapRow() are UNCHANGED from Phase 7, including the
+/// `.order('articles(published_at)', ascending: false)` syntax that must
+/// be preserved.
 class StanzaRepository {
   final SupabaseClient _client;
 
@@ -100,6 +99,68 @@ articles!inner (
     return stanzas;
   }
 
+  /// PHASE 8 NEW: fetches other publishers' coverage of the same event as
+  /// this Stanza's article, for the swipe-left "Related Coverage" sheet.
+  ///
+  /// Two queries rather than one large join: first resolve this stanza's
+  /// article_id and, via event_sources, its event_id; then, only if an
+  /// event exists, fetch every OTHER article linked to that event. Most
+  /// stanzas belong to no event at all (most stories are only covered by
+  /// one source), so this returns an empty list quickly and cheaply in
+  /// the common case.
+  Future<List<RelatedArticle>> fetchRelatedCoverage(String stanzaId) async {
+    final stanzaRow = await _client
+        .from('stanzas')
+        .select('article_id')
+        .eq('stanza_id', stanzaId)
+        .maybeSingle();
+
+    final articleId = stanzaRow?['article_id'] as String?;
+    if (articleId == null) return [];
+
+    final eventLink = await _client
+        .from('event_sources')
+        .select('event_id')
+        .eq('article_id', articleId)
+        .maybeSingle();
+
+    final eventId = eventLink?['event_id'] as String?;
+    if (eventId == null) return [];
+
+    final rows = await _client
+        .from('event_sources')
+        .select('''
+articles!inner (
+  title,
+  source_url,
+  published_at,
+  sources!inner ( name )
+)
+''')
+        .eq('event_id', eventId)
+        .neq('article_id', articleId);
+
+    final related = <RelatedArticle>[];
+    for (final row in rows) {
+      final article = row['articles'];
+      if (article is! Map<String, dynamic>) continue;
+
+      final source = article['sources'];
+      final sourceName = (source is Map<String, dynamic> ? source['name'] : null) as String?;
+      final title = article['title'] as String?;
+      if (title == null) continue;
+
+      related.add(RelatedArticle(
+        title: title,
+        sourceName: sourceName ?? 'Unknown source',
+        sourceUrl: article['source_url'] as String? ?? '',
+        timeAgo: _formatTimeAgo(article['published_at'] as String?),
+      ));
+    }
+
+    return related;
+  }
+
   Stanza? _mapRow(Map<String, dynamic> row) {
     final stanzaId = row['stanza_id'];
     final headline = row['headline'];
@@ -115,12 +176,6 @@ articles!inner (
     final source = article['sources'];
     final sourceName = (source is Map<String, dynamic> ? source['name'] : null);
 
-    // PHASE 7: why_it_matters may now be a real string, or still null for
-    // older articles summarized before this phase deployed, or for
-    // stories the AI judged to have no broader significance. The model's
-    // default ('') keeps the card's existing unconditional rendering
-    // working either way — an empty string just renders an empty line,
-    // same as it always has for every card until now.
     final whyItMatters = row['why_it_matters'] as String?;
 
     return Stanza(

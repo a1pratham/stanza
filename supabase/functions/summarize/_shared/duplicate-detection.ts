@@ -1,14 +1,9 @@
-// Stanza Phase 7 -- basic duplicate/near-identical story detection.
+// Stanza Phase 7/8 -- duplicate/near-identical story detection.
 //
-// Scope note: this is deliberately simple -- headline word-overlap
-// similarity within the same category, compared against already-published
-// Stanzas from roughly the last 24 hours (which is all that exists anyway,
-// given the cleanup job's retention window). No embeddings, no new
-// database columns, no event-clustering data model. Real semantic
-// clustering with a dedicated EVENTS table (spec section 13) is Phase 8's
-// job -- this only prevents the most obvious case: three publishers
-// running near-identical wire copy on the same event, which would
-// otherwise show up as three near-duplicate cards in the feed.
+// PHASE 8 CHANGE: isDuplicate() now returns the matched article's ID
+// (not just a boolean), so the caller can link the two articles into an
+// event (Phase 8) rather than just discarding the duplicate (Phase 7's
+// original behavior). Similarity logic itself is UNCHANGED.
 
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be',
@@ -17,7 +12,6 @@ const STOPWORDS = new Set([
   'says', 'said', 'new', 'has', 'have', 'had', 'will', 'not',
 ]);
 
-/** Normalizes a headline into a set of significant words for comparison. */
 function tokenize(text: string): Set<string> {
   const words = text
     .toLowerCase()
@@ -27,7 +21,6 @@ function tokenize(text: string): Set<string> {
   return new Set(words);
 }
 
-/** Jaccard similarity: intersection size / union size, 0..1. */
 function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let intersection = 0;
@@ -38,34 +31,37 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-// Above this similarity, two headlines are treated as the same underlying
-// event. Chosen conservatively (higher = stricter) to avoid falsely
-// merging two genuinely different stories that just share common nouns
-// (e.g. two different "India" stories). Tune based on observed behavior.
 const SIMILARITY_THRESHOLD = 0.6;
 
 export interface RecentHeadline {
+  articleId: string;
   title: string;
   category: string;
 }
 
 /**
- * Returns true if `title` is a near-duplicate of any already-published
- * story in the same category from the recent-headlines set.
+ * Returns the article_id of the best-matching near-duplicate in the same
+ * category, or null if no match clears the threshold.
  */
-export function isDuplicate(
+export function findDuplicateMatch(
   title: string,
   category: string,
   recent: RecentHeadline[],
-): boolean {
+): string | null {
   const candidateTokens = tokenize(title);
-  if (candidateTokens.size === 0) return false;
+  if (candidateTokens.size === 0) return null;
+
+  let best: { articleId: string; similarity: number } | null = null;
 
   for (const entry of recent) {
     if (entry.category !== category) continue;
     const similarity = jaccardSimilarity(candidateTokens, tokenize(entry.title));
-    if (similarity >= SIMILARITY_THRESHOLD) return true;
+    if (similarity >= SIMILARITY_THRESHOLD) {
+      if (!best || similarity > best.similarity) {
+        best = { articleId: entry.articleId, similarity };
+      }
+    }
   }
 
-  return false;
+  return best?.articleId ?? null;
 }

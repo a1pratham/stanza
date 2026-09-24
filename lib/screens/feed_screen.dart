@@ -4,6 +4,7 @@ import '../models/stanza.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
+import '../widgets/related_coverage_sheet.dart';
 import '../widgets/stanza_swipe_feed.dart';
 import 'saved_screen.dart';
 import 'search_screen.dart';
@@ -117,6 +118,10 @@ class _FeedScreenState extends State<FeedScreen> {
 
   void _openArticle(Stanza stanza) {
     ArticleActions.openArticle(context, stanza);
+  }
+
+  void _openRelatedCoverage(Stanza stanza) {
+    RelatedCoverageSheet.show(context, _repository, stanza.stanzaId);
   }
 
   Future<void> _openSearch() async {
@@ -244,6 +249,7 @@ class _FeedScreenState extends State<FeedScreen> {
       onBookmarkToggle: _toggleBookmark,
       onShare: _onShare,
       onOpenArticle: _openArticle,
+      onSwipeLeft: _openRelatedCoverage,
     );
   }
 }

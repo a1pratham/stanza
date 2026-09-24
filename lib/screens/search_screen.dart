@@ -3,6 +3,7 @@ import '../models/stanza.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
+import '../widgets/related_coverage_sheet.dart';
 import '../widgets/stanza_swipe_feed.dart';
 
 /// PHASE 5 NEW: search screen.
@@ -94,6 +95,10 @@ class _SearchScreenState extends State<SearchScreen> {
     ArticleActions.openArticle(context, stanza);
   }
 
+  void _openRelatedCoverage(Stanza stanza) {
+    RelatedCoverageSheet.show(context, widget.repository, stanza.stanzaId);
+  }
+
   void _openResult(int index) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -108,6 +113,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   onBookmarkToggle: _toggleBookmark,
                   onShare: _onShare,
                   onOpenArticle: _openArticle,
+                  onSwipeLeft: _openRelatedCoverage,
                   controller: PageController(initialPage: index),
                 ),
                 Positioned(

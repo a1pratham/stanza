@@ -3,6 +3,7 @@ import '../models/stanza.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
+import '../widgets/related_coverage_sheet.dart';
 import '../widgets/stanza_swipe_feed.dart';
 
 /// PHASE 5 NEW: Saved screen — shows bookmarked Stanzas.
@@ -79,6 +80,10 @@ class _SavedScreenState extends State<SavedScreen> {
     ArticleActions.openArticle(context, stanza);
   }
 
+  void _openRelatedCoverage(Stanza stanza) {
+    RelatedCoverageSheet.show(context, widget.repository, stanza.stanzaId);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -132,6 +137,7 @@ class _SavedScreenState extends State<SavedScreen> {
             onBookmarkToggle: _toggleBookmark,
             onShare: _onShare,
             onOpenArticle: _openArticle,
+            onSwipeLeft: _openRelatedCoverage,
           ),
         ),
       ],

@@ -1,23 +1,20 @@
-// Stanza Phase 3/7 -- Summarization Edge Function.
+// Stanza Phase 3/7/8 -- Summarization Edge Function.
 //
-// Queries articles with status = 'pending_summary', calls the AI provider
-// once per article, stores the result as a Stanza, and flips the article's
-// status to 'summarized'.
-//
-// PHASE 7 CHANGES:
-//   1. Why-it-matters is now generated (ai-provider.ts) and stored.
-//   2. Before calling the AI, each article's title is compared against
-//      recently published Stanzas in the same category. A near-duplicate
-//      is marked 'duplicate_skipped' and never sent to the AI at all --
-//      this also saves Groq quota, not just feed clutter.
+// PHASE 8 CHANGE: a near-duplicate article is no longer just discarded.
+// It's linked, along with its canonical (first-seen) article, into an
+// `events` row via event_sources -- this is what powers the Flutter
+// app's "Related Coverage" (swipe left). The article is still marked
+// 'duplicate_skipped' and still never gets its own Stanza/AI call --
+// only the linking behavior around that is new.
 //
 // Everything else (atomic claim, batch size, insufficient-content skip,
-// failure handling, ordering) is UNCHANGED from the deployed Phase 3
-// version.
+// why-it-matters generation, failure handling, ordering) is UNCHANGED
+// from the deployed Phase 7 version.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { summarizeArticle } from './_shared/ai-provider.ts';
-import { isDuplicate, type RecentHeadline } from './_shared/duplicate-detection.ts';
+import { findDuplicateMatch, type RecentHeadline } from './_shared/duplicate-detection.ts';
+import { linkArticlesToEvent } from './_shared/event-linking.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -25,31 +22,28 @@ const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BATCH_SIZE = 5;
 
 /**
- * Loads recently published Stanzas' titles + categories once per
- * invocation, so duplicate-checking each article in the batch doesn't
- * require a separate query per article. 24h is generous here on purpose
- * -- the hourly cleanup job means this table realistically never holds
- * more than a day of news anyway, so this is effectively "everything
- * currently live."
+ * Loads recently published Stanzas' article_id + title + category once
+ * per invocation. UNCHANGED in purpose from Phase 7; now also returns
+ * article_id so a match can be linked via event_sources.
  */
 async function loadRecentHeadlines(supabase: any): Promise<RecentHeadline[]> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
     .from('stanzas')
-    .select('articles!inner(title, category, published_at)')
+    .select('articles!inner(article_id, title, category, published_at)')
     .eq('status', 'published')
     .gte('articles.published_at', cutoff);
 
   if (error) {
     console.error('Failed to load recent headlines for dedup check:', error.message);
-    return []; // fail open: dedup is a nice-to-have, not worth blocking summarization
+    return [];
   }
 
   return (data ?? [])
     .map((row: any) => row.articles)
-    .filter((a: any) => a?.title && a?.category)
-    .map((a: any) => ({ title: a.title, category: a.category }));
+    .filter((a: any) => a?.article_id && a?.title && a?.category)
+    .map((a: any) => ({ articleId: a.article_id, title: a.title, category: a.category }));
 }
 
 Deno.serve(async (_req) => {
@@ -74,16 +68,15 @@ Deno.serve(async (_req) => {
 
     const recentHeadlines = await loadRecentHeadlines(supabase);
 
-    const results = { succeeded: 0, failed: 0, duplicatesSkipped: 0, errors: [] as string[] };
+    const results = {
+      succeeded: 0,
+      failed: 0,
+      duplicatesLinked: 0,
+      errors: [] as string[],
+    };
 
     for (const article of articles) {
       try {
-        // Claim the article atomically before doing anything else. A
-        // concurrent invocation may have selected the same pending
-        // article, but only one invocation can change it from
-        // pending_summary to summarizing. This prevents duplicate AI
-        // generation for the SAME article (distinct from Phase 7's
-        // cross-article duplicate detection below).
         const { data: claimed, error: claimError } = await supabase
           .from('articles')
           .update({ status: 'summarizing', updated_at: new Date().toISOString() })
@@ -92,13 +85,8 @@ Deno.serve(async (_req) => {
           .select('article_id');
 
         if (claimError) throw claimError;
-        if (!claimed || claimed.length === 0) {
-          // Another summarizer invocation claimed this article first.
-          continue;
-        }
+        if (!claimed || claimed.length === 0) continue;
 
-        // Skip anything too thin to summarize meaningfully rather than
-        // risking a fabricated summary (spec section 26).
         if (!article.description || article.description.trim().length < 40) {
           await supabase
             .from('articles')
@@ -108,16 +96,36 @@ Deno.serve(async (_req) => {
           continue;
         }
 
-        // PHASE 7: duplicate/near-identical story check, before spending
-        // any AI quota. Compares this article's title against already
-        // published stories in the same category.
-        if (isDuplicate(article.title, article.category, recentHeadlines)) {
+        // PHASE 8: find a near-duplicate; if found, link both articles to
+        // an event instead of just discarding this one.
+        const matchedArticleId = findDuplicateMatch(article.title, article.category, recentHeadlines);
+
+        if (matchedArticleId) {
+          try {
+            await linkArticlesToEvent(
+              supabase,
+              matchedArticleId,
+              article.article_id,
+              article.title,
+              article.category,
+            );
+          } catch (linkErr) {
+            // Event linking failing shouldn't block marking the article as
+            // a duplicate -- worst case, this one story is a standalone
+            // duplicate_skipped article with no Related Coverage entry,
+            // which is no worse than Phase 7's behavior.
+            console.error(
+              `Event linking failed for article ${article.article_id}:`,
+              linkErr.message,
+            );
+          }
+
           await supabase
             .from('articles')
             .update({ status: 'duplicate_skipped', updated_at: new Date().toISOString() })
             .eq('article_id', article.article_id)
             .eq('status', 'summarizing');
-          results.duplicatesSkipped += 1;
+          results.duplicatesLinked += 1;
           continue;
         }
 
@@ -145,10 +153,11 @@ Deno.serve(async (_req) => {
           .update({ status: 'summarized', updated_at: new Date().toISOString() })
           .eq('article_id', article.article_id);
 
-        // Own headline joins the in-memory recent list too, so later
-        // articles in THIS SAME batch can be deduped against it without
-        // waiting for the next invocation.
-        recentHeadlines.push({ title: result.headline, category: article.category });
+        recentHeadlines.push({
+          articleId: article.article_id,
+          title: result.headline,
+          category: article.category,
+        });
 
         results.succeeded += 1;
       } catch (err) {
@@ -166,7 +175,7 @@ Deno.serve(async (_req) => {
 
     console.log(
       `Summarization complete. Succeeded: ${results.succeeded}, ` +
-        `Duplicates skipped: ${results.duplicatesSkipped}, Failed: ${results.failed}`,
+        `Duplicates linked: ${results.duplicatesLinked}, Failed: ${results.failed}`,
     );
 
     return new Response(

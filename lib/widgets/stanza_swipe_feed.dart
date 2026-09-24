@@ -2,20 +2,21 @@ import 'package:flutter/material.dart';
 import '../models/stanza.dart';
 import 'stanza_card.dart';
 
-/// The vertical swipeable PageView of StanzaCards, factored out of
-/// FeedScreen so Search and (filtered) Home can share the exact same
-/// swipe/bookmark/share/open-article behavior instead of duplicating it.
+/// The vertical swipeable PageView of StanzaCards, shared by Home, Search
+/// results, and Saved.
 ///
-/// This is a pure presentation + gesture widget — it owns no data loading
-/// and no bookmark persistence. The parent screen supplies the list and
-/// the current bookmark set, and is notified via callbacks. StanzaCard
-/// itself is untouched, imported and used exactly as in Phase 1/4.
+/// PHASE 8 CHANGE: added an optional `onSwipeLeft` callback, fired on a
+/// fast leftward drag (the gesture spec section 6 originally reserved for
+/// this). It's nullable and simply not invoked if omitted, so any
+/// existing call site that doesn't pass it keeps behaving exactly as
+/// before — nothing about the rightward-swipe/open-article path changed.
 class StanzaSwipeFeed extends StatelessWidget {
   final List<Stanza> stanzas;
   final Set<String> bookmarkedIds;
   final ValueChanged<Stanza> onBookmarkToggle;
   final ValueChanged<Stanza> onShare;
   final ValueChanged<Stanza> onOpenArticle;
+  final ValueChanged<Stanza>? onSwipeLeft;
   final PageController? controller;
 
   const StanzaSwipeFeed({
@@ -25,6 +26,7 @@ class StanzaSwipeFeed extends StatelessWidget {
     required this.onBookmarkToggle,
     required this.onShare,
     required this.onOpenArticle,
+    this.onSwipeLeft,
     this.controller,
   });
 
@@ -39,7 +41,11 @@ class StanzaSwipeFeed extends StatelessWidget {
         return GestureDetector(
           onHorizontalDragEnd: (details) {
             final velocity = details.primaryVelocity ?? 0;
-            if (velocity > 250) onOpenArticle(stanza);
+            if (velocity > 250) {
+              onOpenArticle(stanza);
+            } else if (velocity < -250 && onSwipeLeft != null) {
+              onSwipeLeft!(stanza);
+            }
           },
           child: StanzaCard(
             stanza: stanza,
