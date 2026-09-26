@@ -1,9 +1,9 @@
-// Stanza Phase 7/8 -- duplicate/near-identical story detection.
+// Stanza Phase 7/8/9 -- duplicate/near-identical story detection.
 //
-// PHASE 8 CHANGE: isDuplicate() now returns the matched article's ID
-// (not just a boolean), so the caller can link the two articles into an
-// event (Phase 8) rather than just discarding the duplicate (Phase 7's
-// original behavior). Similarity logic itself is UNCHANGED.
+// PHASE 9 CHANGE: RecentHeadline now also carries reliabilityTier, so the
+// caller (index.ts) can pass source-quality info through to event-linking
+// without a second query. Similarity logic itself is UNCHANGED from
+// Phase 7/8.
 
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be',
@@ -37,31 +37,33 @@ export interface RecentHeadline {
   articleId: string;
   title: string;
   category: string;
+  reliabilityTier: number;
 }
 
 /**
- * Returns the article_id of the best-matching near-duplicate in the same
- * category, or null if no match clears the threshold.
+ * Returns the best-matching near-duplicate headline entry (including its
+ * reliability tier, needed for Phase 9's title-preference logic), or null
+ * if no match clears the threshold.
  */
 export function findDuplicateMatch(
   title: string,
   category: string,
   recent: RecentHeadline[],
-): string | null {
+): RecentHeadline | null {
   const candidateTokens = tokenize(title);
   if (candidateTokens.size === 0) return null;
 
-  let best: { articleId: string; similarity: number } | null = null;
+  let best: { entry: RecentHeadline; similarity: number } | null = null;
 
   for (const entry of recent) {
     if (entry.category !== category) continue;
     const similarity = jaccardSimilarity(candidateTokens, tokenize(entry.title));
     if (similarity >= SIMILARITY_THRESHOLD) {
       if (!best || similarity > best.similarity) {
-        best = { articleId: entry.articleId, similarity };
+        best = { entry, similarity };
       }
     }
   }
 
-  return best?.articleId ?? null;
+  return best?.entry ?? null;
 }
