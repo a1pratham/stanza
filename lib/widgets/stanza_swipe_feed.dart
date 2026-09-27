@@ -5,11 +5,10 @@ import 'stanza_card.dart';
 /// The vertical swipeable PageView of StanzaCards, shared by Home, Search
 /// results, and Saved.
 ///
-/// PHASE 8 CHANGE: added an optional `onSwipeLeft` callback, fired on a
-/// fast leftward drag (the gesture spec section 6 originally reserved for
-/// this). It's nullable and simply not invoked if omitted, so any
-/// existing call site that doesn't pass it keeps behaving exactly as
-/// before — nothing about the rightward-swipe/open-article path changed.
+/// PHASE 10 CHANGE: added an optional `onPageChanged` callback, fired
+/// whenever the visible card changes (swipe up/down). Nullable, so any
+/// caller that doesn't pass it behaves exactly as before -- same pattern
+/// as Phase 8's `onSwipeLeft` addition.
 class StanzaSwipeFeed extends StatelessWidget {
   final List<Stanza> stanzas;
   final Set<String> bookmarkedIds;
@@ -17,6 +16,7 @@ class StanzaSwipeFeed extends StatelessWidget {
   final ValueChanged<Stanza> onShare;
   final ValueChanged<Stanza> onOpenArticle;
   final ValueChanged<Stanza>? onSwipeLeft;
+  final ValueChanged<int>? onPageChanged;
   final PageController? controller;
 
   const StanzaSwipeFeed({
@@ -27,6 +27,7 @@ class StanzaSwipeFeed extends StatelessWidget {
     required this.onShare,
     required this.onOpenArticle,
     this.onSwipeLeft,
+    this.onPageChanged,
     this.controller,
   });
 
@@ -36,6 +37,7 @@ class StanzaSwipeFeed extends StatelessWidget {
       controller: controller,
       scrollDirection: Axis.vertical,
       itemCount: stanzas.length,
+      onPageChanged: onPageChanged,
       itemBuilder: (context, index) {
         final stanza = stanzas[index];
         return GestureDetector(

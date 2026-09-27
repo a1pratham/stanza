@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/stanza.dart';
+import '../services/analytics_service.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
@@ -31,6 +32,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
+  final AnalyticsService _analytics = AnalyticsService();
   List<Stanza> _results = const [];
   bool _isLoading = false;
   String? _error;
@@ -66,6 +68,7 @@ class _SearchScreenState extends State<SearchScreen> {
         _results = results;
         _isLoading = false;
       });
+      _analytics.logSearch(query, results.length);
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -89,14 +92,17 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onShare(Stanza stanza) {
     ArticleActions.share(stanza);
+    _analytics.logShare(stanza.stanzaId);
   }
 
   void _openArticle(Stanza stanza) {
     ArticleActions.openArticle(context, stanza);
+    _analytics.logArticleOpen(stanza.stanzaId);
   }
 
   void _openRelatedCoverage(Stanza stanza) {
     RelatedCoverageSheet.show(context, widget.repository, stanza.stanzaId);
+    _analytics.logRelatedCoverageOpen(stanza.stanzaId);
   }
 
   void _openResult(int index) {

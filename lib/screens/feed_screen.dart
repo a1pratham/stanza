@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
 import '../models/stanza.dart';
+import '../services/analytics_service.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
@@ -33,6 +34,7 @@ class FeedScreen extends StatefulWidget {
 class _FeedScreenState extends State<FeedScreen> {
   final StanzaRepository _repository = StanzaRepository();
   final BookmarkStore _bookmarkStore = BookmarkStore();
+  final AnalyticsService _analytics = AnalyticsService();
 
   List<Stanza> _stanzas = const [];
   Set<String> _bookmarkedIds = {};
@@ -41,11 +43,45 @@ class _FeedScreenState extends State<FeedScreen> {
   bool _isLoading = true;
   String? _error;
 
+  // PHASE 10: tracks reading time for the currently-visible card.
+  DateTime? _currentCardShownAt;
+  String? _currentStanzaId;
+
   @override
   void initState() {
     super.initState();
     _loadFeed();
     _loadBookmarks();
+  }
+
+  @override
+  void dispose() {
+    _flushCurrentCardDuration();
+    super.dispose();
+  }
+
+  /// PHASE 10: logs how long the previously-visible card was on screen,
+  /// then starts timing the new one. Called on every page change and once
+  /// more on dispose, so the last card viewed in a session is still
+  /// counted.
+  void _flushCurrentCardDuration() {
+    final shownAt = _currentCardShownAt;
+    final stanzaId = _currentStanzaId;
+    if (shownAt != null && stanzaId != null) {
+      _analytics.logStoryView(stanzaId, DateTime.now().difference(shownAt));
+    }
+  }
+
+  void _onPageChanged(int index) {
+    _flushCurrentCardDuration();
+    final visible = _visibleStanzas;
+    if (index >= 0 && index < visible.length) {
+      _currentStanzaId = visible[index].stanzaId;
+      _currentCardShownAt = DateTime.now();
+    } else {
+      _currentStanzaId = null;
+      _currentCardShownAt = null;
+    }
   }
 
   Future<void> _loadBookmarks() async {
@@ -77,6 +113,13 @@ class _FeedScreenState extends State<FeedScreen> {
         _stanzas = stanzas;
         _isLoading = false;
       });
+      // PHASE 10: start timing the first card, same as _onPageChanged does
+      // for subsequent ones.
+      _flushCurrentCardDuration();
+      if (stanzas.isNotEmpty) {
+        _currentStanzaId = stanzas.first.stanzaId;
+        _currentCardShownAt = DateTime.now();
+      }
     } catch (err) {
       if (!mounted) return;
       setState(() {
@@ -102,6 +145,7 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Future<void> _toggleBookmark(Stanza stanza) async {
+    final nowBookmarked = !_bookmarkedIds.contains(stanza.stanzaId);
     setState(() {
       if (_bookmarkedIds.contains(stanza.stanzaId)) {
         _bookmarkedIds = {..._bookmarkedIds}..remove(stanza.stanzaId);
@@ -110,18 +154,22 @@ class _FeedScreenState extends State<FeedScreen> {
       }
     });
     await _bookmarkStore.save(_bookmarkedIds);
+    _analytics.logBookmarkToggle(stanza.stanzaId, nowBookmarked);
   }
 
   void _onShare(Stanza stanza) {
     ArticleActions.share(stanza);
+    _analytics.logShare(stanza.stanzaId);
   }
 
   void _openArticle(Stanza stanza) {
     ArticleActions.openArticle(context, stanza);
+    _analytics.logArticleOpen(stanza.stanzaId);
   }
 
   void _openRelatedCoverage(Stanza stanza) {
     RelatedCoverageSheet.show(context, _repository, stanza.stanzaId);
+    _analytics.logRelatedCoverageOpen(stanza.stanzaId);
   }
 
   Future<void> _openSearch() async {
@@ -193,8 +241,24 @@ class _FeedScreenState extends State<FeedScreen> {
                     child: ChoiceChip(
                       label: Text(category),
                       selected: selected,
-                      onSelected: (_) =>
-                          setState(() => _selectedCategory = category),
+                      onSelected: (_) {
+                        setState(() => _selectedCategory = category);
+                        // PHASE 10: category change swaps to a fresh
+                        // PageView starting at index 0 (see the ValueKey
+                        // on StanzaSwipeFeed below), so reading-time
+                        // tracking needs to restart the same way it does
+                        // on initial load.
+                        _flushCurrentCardDuration();
+                        final visible = _visibleStanzas;
+                        if (visible.isNotEmpty) {
+                          _currentStanzaId = visible.first.stanzaId;
+                          _currentCardShownAt = DateTime.now();
+                        } else {
+                          _currentStanzaId = null;
+                          _currentCardShownAt = null;
+                        }
+                        _analytics.logCategoryFilter(category);
+                      },
                       backgroundColor: const Color(0xFF181818),
                       selectedColor: Colors.amberAccent,
                       labelStyle: TextStyle(
@@ -250,6 +314,7 @@ class _FeedScreenState extends State<FeedScreen> {
       onShare: _onShare,
       onOpenArticle: _openArticle,
       onSwipeLeft: _openRelatedCoverage,
+      onPageChanged: _onPageChanged,
     );
   }
 }

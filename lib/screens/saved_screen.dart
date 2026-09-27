@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/stanza.dart';
+import '../services/analytics_service.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
@@ -34,6 +35,7 @@ class _SavedScreenState extends State<SavedScreen> {
   bool _isLoading = true;
   String? _error;
   late Set<String> _bookmarkedIds;
+  final AnalyticsService _analytics = AnalyticsService();
 
   @override
   void initState() {
@@ -70,18 +72,22 @@ class _SavedScreenState extends State<SavedScreen> {
     });
     await widget.bookmarkStore.save(_bookmarkedIds);
     widget.onBookmarksChanged(_bookmarkedIds);
+    _analytics.logBookmarkToggle(stanza.stanzaId, false);
   }
 
   void _onShare(Stanza stanza) {
     ArticleActions.share(stanza);
+    _analytics.logShare(stanza.stanzaId);
   }
 
   void _openArticle(Stanza stanza) {
     ArticleActions.openArticle(context, stanza);
+    _analytics.logArticleOpen(stanza.stanzaId);
   }
 
   void _openRelatedCoverage(Stanza stanza) {
     RelatedCoverageSheet.show(context, widget.repository, stanza.stanzaId);
+    _analytics.logRelatedCoverageOpen(stanza.stanzaId);
   }
 
   @override
