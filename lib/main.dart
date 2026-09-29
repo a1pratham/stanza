@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
 import 'screens/feed_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,9 +26,9 @@ class StanzaApp extends StatelessWidget {
       title: 'Stanza',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: Colors.black,
+        scaffoldBackgroundColor: AppColors.bgBottom,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.amberAccent,
+          seedColor: AppColors.accent,
           brightness: Brightness.dark,
         ),
       ),

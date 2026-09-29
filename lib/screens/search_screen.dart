@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
+import '../config/supabase_config.dart';
 import '../models/stanza.dart';
 import '../services/analytics_service.dart';
 import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
+import '../theme/app_theme.dart';
+import '../widgets/article_list_card.dart';
 import '../widgets/related_coverage_sheet.dart';
-import '../widgets/stanza_swipe_feed.dart';
+import '../widgets/stanza_top_bar.dart';
+import '../widgets/story_viewer.dart';
 
-/// PHASE 5 NEW: search screen.
+/// Search screen: wordmark, rounded search field and a list of story cards.
 ///
-/// Shows a text field and a simple result list (headline + source/time).
-/// Tapping a result opens the same swipeable full-screen card experience
-/// used on Home, scoped to the search results, via StanzaSwipeFeed.
+/// Before a search is run the list shows the latest stories; submitting a
+/// query shows matching stories. Tapping a card opens the same swipeable
+/// full-screen card experience used on Home, scoped to the list shown.
 class SearchScreen extends StatefulWidget {
   final StanzaRepository repository;
   final Set<String> bookmarkedIds;
@@ -33,6 +37,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final AnalyticsService _analytics = AnalyticsService();
+  List<Stanza> _latest = const [];
   List<Stanza> _results = const [];
   bool _isLoading = false;
   String? _error;
@@ -43,6 +48,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _bookmarkedIds = widget.bookmarkedIds;
+    _loadLatest();
   }
 
   @override
@@ -51,9 +57,33 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
+  List<Stanza> get _shown => _searched ? _results : _latest;
+
+  Future<void> _loadLatest() async {
+    if (!SupabaseConfig.isConfigured) return;
+    setState(() => _isLoading = true);
+    try {
+      final latest = await widget.repository.fetchFeed();
+      if (!mounted) return;
+      setState(() {
+        _latest = latest;
+        _isLoading = false;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _error = err.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
   Future<void> _runSearch() async {
     final query = _controller.text.trim();
-    if (query.isEmpty) return;
+    if (query.isEmpty) {
+      _clear();
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -76,6 +106,15 @@ class _SearchScreenState extends State<SearchScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  void _clear() {
+    _controller.clear();
+    setState(() {
+      _searched = false;
+      _results = const [];
+      _error = null;
+    });
   }
 
   Future<void> _toggleBookmark(Stanza stanza) async {
@@ -106,34 +145,16 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void _openResult(int index) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          body: SafeArea(
-            child: Stack(
-              children: [
-                StanzaSwipeFeed(
-                  stanzas: _results,
-                  bookmarkedIds: _bookmarkedIds,
-                  onBookmarkToggle: _toggleBookmark,
-                  onShare: _onShare,
-                  onOpenArticle: _openArticle,
-                  onSwipeLeft: _openRelatedCoverage,
-                  controller: PageController(initialPage: index),
-                ),
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+    StoryViewer.open(
+      context,
+      StoryViewer(
+        stanzas: List<Stanza>.of(_shown),
+        initialIndex: index,
+        currentBookmarks: () => _bookmarkedIds,
+        onBookmarkToggle: _toggleBookmark,
+        onShare: _onShare,
+        onOpenArticle: _openArticle,
+        onSwipeLeft: _openRelatedCoverage,
       ),
     );
   }
@@ -141,80 +162,102 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: TextField(
-          controller: _controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Search stories...',
-            hintStyle: TextStyle(color: Colors.white38),
-            border: InputBorder.none,
+      backgroundColor: AppColors.bgBottom,
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppColors.background),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const StanzaTopBar(),
+              const SizedBox(height: 14),
+              _buildSearchField(),
+              const SizedBox(height: 16),
+              Expanded(child: _buildBody()),
+            ],
           ),
-          textInputAction: TextInputAction.search,
-          onSubmitted: (_) => _runSearch(),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
-            onPressed: _runSearch,
-          ),
-        ],
       ),
-      body: _buildBody(),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: Colors.white.withOpacity(0.14)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search, color: Color(0xFFB5BCCB), size: 26),
+            const SizedBox(width: 14),
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                autofocus: true,
+                cursorColor: AppColors.accent,
+                style: AppText.sans(size: 15.5, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Search news, topics, places or people\u2026',
+                  hintStyle: AppText.sans(size: 15.5, color: const Color(0xFF8E97A8)),
+                  border: InputBorder.none,
+                  isCollapsed: true,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) => _runSearch(),
+              ),
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _clear,
+              child: const Padding(
+                padding: EdgeInsets.only(left: 8),
+                child: Icon(Icons.close, color: Color(0xFFB5BCCB), size: 24),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.amberAccent),
-      );
+      return const Center(child: CircularProgressIndicator(color: AppColors.accent));
     }
 
     if (_error != null) {
       return Center(
-        child: Text(_error!, style: const TextStyle(color: Colors.white54)),
-      );
-    }
-
-    if (!_searched) {
-      return const Center(
-        child: Text(
-          'Search headlines and summaries',
-          style: TextStyle(color: Colors.white38),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(_error!, style: AppText.sans(color: AppColors.textMuted)),
         ),
       );
     }
 
-    if (_results.isEmpty) {
-      return const Center(
-        child: Text('No matching stories', style: TextStyle(color: Colors.white54)),
+    final items = _shown;
+
+    if (items.isEmpty) {
+      return Center(
+        child: Text(
+          _searched ? 'No matching stories' : 'Search headlines and summaries',
+          style: AppText.sans(color: AppColors.textMuted),
+        ),
       );
     }
 
     return ListView.separated(
-      itemCount: _results.length,
-      separatorBuilder: (_, __) => const Divider(color: Colors.white12, height: 1),
-      itemBuilder: (context, index) {
-        final stanza = _results[index];
-        return ListTile(
-          onTap: () => _openResult(index),
-          title: Text(
-            stanza.headline,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-          ),
-          subtitle: Text(
-            '${stanza.sourceName} · ${stanza.timeAgo}',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
-          ),
-          trailing: _bookmarkedIds.contains(stanza.stanzaId)
-              ? const Icon(Icons.bookmark, color: Colors.amberAccent, size: 18)
-              : null,
-        );
-      },
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) => ArticleListCard(
+        stanza: items[index],
+        onTap: () => _openResult(index),
+      ),
     );
   }
 }

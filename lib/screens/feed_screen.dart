@@ -6,7 +6,9 @@ import '../services/article_actions.dart';
 import '../services/bookmark_store.dart';
 import '../services/stanza_repository.dart';
 import '../widgets/related_coverage_sheet.dart';
+import '../theme/app_theme.dart';
 import '../widgets/stanza_swipe_feed.dart';
+import '../widgets/stanza_top_bar.dart';
 import 'saved_screen.dart';
 import 'search_screen.dart';
 
@@ -38,7 +40,6 @@ class _FeedScreenState extends State<FeedScreen> {
 
   List<Stanza> _stanzas = const [];
   Set<String> _bookmarkedIds = {};
-  String _selectedCategory = 'All';
 
   bool _isLoading = true;
   String? _error;
@@ -129,20 +130,7 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  /// Categories are derived from whatever is actually in the loaded feed,
-  /// so the chip row never shows a category with zero live stories.
-  List<String> get _availableCategories {
-    final set = <String>{'All'};
-    for (final s in _stanzas) {
-      set.add(s.category);
-    }
-    return set.toList();
-  }
-
-  List<Stanza> get _visibleStanzas {
-    if (_selectedCategory == 'All') return _stanzas;
-    return _stanzas.where((s) => s.category == _selectedCategory).toList();
-  }
+  List<Stanza> get _visibleStanzas => _stanzas;
 
   Future<void> _toggleBookmark(Stanza stanza) async {
     final nowBookmarked = !_bookmarkedIds.contains(stanza.stanzaId);
@@ -201,7 +189,7 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.bgBottom,
       body: Stack(
         children: [
           _buildBody(),
@@ -213,66 +201,10 @@ class _FeedScreenState extends State<FeedScreen> {
 
   Widget _buildTopBar() {
     return SafeArea(
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Spacer(),
-              IconButton(
-                onPressed: _openSearch,
-                icon: const Icon(Icons.search, color: Colors.white),
-              ),
-              IconButton(
-                onPressed: _openSaved,
-                icon: const Icon(Icons.bookmark, color: Colors.white),
-              ),
-            ],
-          ),
-          if (!_isLoading && _error == null && _stanzas.isNotEmpty)
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: _availableCategories.map((category) {
-                  final selected = category == _selectedCategory;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ChoiceChip(
-                      label: Text(category),
-                      selected: selected,
-                      onSelected: (_) {
-                        setState(() => _selectedCategory = category);
-                        // PHASE 10: category change swaps to a fresh
-                        // PageView starting at index 0 (see the ValueKey
-                        // on StanzaSwipeFeed below), so reading-time
-                        // tracking needs to restart the same way it does
-                        // on initial load.
-                        _flushCurrentCardDuration();
-                        final visible = _visibleStanzas;
-                        if (visible.isNotEmpty) {
-                          _currentStanzaId = visible.first.stanzaId;
-                          _currentCardShownAt = DateTime.now();
-                        } else {
-                          _currentStanzaId = null;
-                          _currentCardShownAt = null;
-                        }
-                        _analytics.logCategoryFilter(category);
-                      },
-                      backgroundColor: const Color(0xFF181818),
-                      selectedColor: Colors.amberAccent,
-                      labelStyle: TextStyle(
-                        color: selected ? Colors.black : Colors.white70,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      side: BorderSide.none,
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-        ],
+      bottom: false,
+      child: StanzaTopBar(
+        onSearch: _openSearch,
+        onSaved: _openSaved,
       ),
     );
   }
@@ -280,7 +212,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Widget _buildBody() {
     if (_isLoading) {
       return const Center(
-        child: CircularProgressIndicator(color: Colors.amberAccent),
+        child: CircularProgressIndicator(color: AppColors.accent),
       );
     }
 
@@ -298,16 +230,14 @@ class _FeedScreenState extends State<FeedScreen> {
     if (visible.isEmpty) {
       return _FeedMessage(
         icon: Icons.article_outlined,
-        title: _stanzas.isEmpty ? 'No stories yet' : 'No stories in this category',
-        message: _stanzas.isEmpty
-            ? 'No published Stanzas were found. The pipeline may still be generating them.'
-            : 'Try a different category.',
+        title: 'No stories yet',
+        message:
+            'No published Stanzas were found. The pipeline may still be generating them.',
         onRetry: _loadFeed,
       );
     }
 
     return StanzaSwipeFeed(
-      key: ValueKey(_selectedCategory), // fresh PageController per filter
       stanzas: visible,
       bookmarkedIds: _bookmarkedIds,
       onBookmarkToggle: _toggleBookmark,
@@ -361,7 +291,7 @@ class _FeedMessage extends StatelessWidget {
               const SizedBox(height: 20),
               TextButton(
                 onPressed: onRetry,
-                style: TextButton.styleFrom(foregroundColor: Colors.amberAccent),
+                style: TextButton.styleFrom(foregroundColor: AppColors.accent),
                 child: const Text('Retry'),
               ),
             ],
