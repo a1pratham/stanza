@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "255964525120-5okl53m4an0rh38cbdbjb514seku878i.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pratham.stanza",
+            "certificate_hash": "f4e4eda36b7c55e4d0b4cbaa9e04b8ca1d79972d"
+          }
+        },
+        {
           "client_id": "255964525120-hib41e8kl2a3mrvtg2ui5lco0pf9cd68.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
-import 'screens/feed_screen.dart';
+import 'screens/app_root.dart';
 
 /// AUTH PIVOT: this file now initializes Firebase FIRST, then initializes
 /// Supabase with an `accessToken` callback instead of letting it manage
@@ -73,7 +73,7 @@ class StanzaApp extends StatelessWidget {
       // The splash -> auth-check -> onboarding -> feed state machine
       // (AppRoot) is a later part, once auth_service.dart and
       // profile_service.dart actually exist for it to branch on.
-      home: const FeedScreen(),
+        home: const AppRoot(),
     );
   }
 }
