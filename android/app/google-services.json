@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "255964525120",
+    "project_id": "stanza-37f87",
+    "storage_bucket": "stanza-37f87.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:255964525120:android:ce6b8d75540f0733a1e5a5",
+        "android_client_info": {
+          "package_name": "com.pratham.stanza"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "255964525120-hib41e8kl2a3mrvtg2ui5lco0pf9cd68.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA1PbV10bmxHx84cZKxtK3fL9V0iK7CI6M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "255964525120-hib41e8kl2a3mrvtg2ui5lco0pf9cd68.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

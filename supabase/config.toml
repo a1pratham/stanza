@@ -2,3 +2,10 @@ project_id = "stanza"
 
 [functions.ingest]
 verify_jwt = false
+
+[functions.set-auth-role]
+verify_jwt = false
+
+[auth.third_party.firebase]
+enabled = true
+project_id = "stanza-37f87"
